@@ -1741,12 +1741,19 @@ def _LocationListToGoTo( request_data, response ):
 
   try:
     if len( response[ 'result' ] ) > 1:
-      positions = response[ 'result' ]
+      # Sort positions by file name.
+      positions = sorted( response[ 'result' ], key = itemgetter( 'uri' ) )
+      locations = []
+      # Parition the position list by file name.
+      for uri, positions_per_file in itertools.groupby(
+          positions, key = lambda p:p[ 'uri' ] ):
+        locations.extend(
+            _FilePositionsToLocationAndDescription( request_data,
+                                                    uri,
+                                                    positions_per_file ) )
       return [
-        responses.BuildGoToResponseFromLocation(
-          *_PositionToLocationAndDescription( request_data,
-                                              position ) )
-        for position in positions
+        responses.BuildGoToResponseFromLocation( *location )
+        for location in locations
       ]
     else:
       position = response[ 'result' ][ 0 ]
@@ -1756,11 +1763,12 @@ def _LocationListToGoTo( request_data, response ):
     raise RuntimeError( 'Cannot jump to location' )
 
 
-def _PositionToLocationAndDescription( request_data, position ):
-  """Convert a LSP position to a ycmd location."""
+def _FilePositionsToLocationAndDescription( request_data, uri, positions ):
+  """Convert a list of LSP positions in a file to a list of ycmd locations."""
   try:
-    filename = lsp.UriToFilePath( position[ 'uri' ] )
+    filename = lsp.UriToFilePath( uri )
     file_contents = GetFileLines( request_data, filename )
+
   except lsp.InvalidUriException:
     _logger.debug( "Invalid URI, file contents not available in GoTo" )
     filename = ''
@@ -1773,9 +1781,19 @@ def _PositionToLocationAndDescription( request_data, position ):
                        "GoTo location" )
     file_contents = []
 
-  return _BuildLocationAndDescription( filename,
-                                       file_contents,
-                                       position[ 'range' ][ 'start' ] )
+  return [
+      _BuildLocationAndDescription( filename,
+                                    file_contents,
+                                    position[ 'range' ][ 'start' ] )
+      for position in positions
+  ]
+
+
+def _PositionToLocationAndDescription( request_data, position ):
+  """Convert a LSP position to a ycmd location."""
+  return _FilePositionsToLocationAndDescription( request_data,
+                                                 position[ 'uri' ],
+                                                 [ position ] )[ 0 ]
 
 
 def _BuildLocationAndDescription( filename, file_contents, loc ):
